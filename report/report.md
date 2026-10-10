@@ -10,17 +10,11 @@
 
 ### 小组分工
 
-练习如何分工？
-
 | 成员 | 负责的练习/模块 |
 |------|----------------|
 | 2412930-林永圣 | 构建环境检查；分析 Makefile 与 `ucore.img` 生成流程；维护自动构建测试 |
 | 2414063-尹天宇 | 分析 `kernel.ld`、内存布局、内核栈及 `entry.S` 入口代码 |
 | 2412763-王泽鼎 | 分析 QEMU/OpenSBI 启动过程；完成 GDB 调试验证、截图和交付检查 |
-
-实验报告如何分工？
-
-三名成员分别撰写自己负责模块的原理、实现与测试说明；王泽鼎负责按照统一模板汇总报告和测试截图，林永圣复核构建命令与参数，尹天宇复核地址、符号和汇编分析，最后由三人共同检查结论与仓库结构。
 
 ---
 
@@ -55,9 +49,9 @@
 
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|------------|---------|------|
-| 2412930-林永圣 | Codex 桌面端 | OpenAI GPT-5（Codex） | 小组共享会话；用于 Makefile 分析和自动测试设计 |
-| 2414063-尹天宇 | Codex 桌面端 | OpenAI GPT-5（Codex） | 小组共享会话；用于链接脚本和入口汇编分析 |
-| 2412763-王泽鼎 | Codex 桌面端 | OpenAI GPT-5（Codex） | 小组共享会话；用于 OpenSBI/GDB 验证和报告整理 |
+| 2412930-林永圣 | Codex 桌面端 | OpenAI GPT-5（Codex） |  Makefile 分析和自动测试设计 |
+| 2414063-尹天宇 | Codex 桌面端 | OpenAI GPT-5（Codex） |  链接脚本和入口汇编分析 |
+| 2412763-王泽鼎 | Codex 桌面端 | OpenAI GPT-5（Codex） |  OpenSBI/GDB 验证和报告整理 |
 
 **说明：** 三名成员共同审核 AI 生成内容；最终结论均以课程压缩包中的实际代码、交叉编译结果和 QEMU/GDB 实测数据为准。
 
@@ -197,9 +191,9 @@ Post-Condition：能够解释 ucore.img 的完整生成链，并提供可重复�
 
 **最终结果：**
 
-- ✅ 压缩包原始代码能够交叉编译并生成两个目标文件。
-- ✅ `bin/kernel` 为 ELF64 little-RISC-V，`bin/ucore.img` 为裸二进制。
-- ⚠️ 原有 `grade` 目标引用了压缩包中不存在的 `tools/grade.sh`。
+- 压缩包原始代码能够交叉编译并生成两个目标文件。
+- `bin/kernel` 为 ELF64 little-RISC-V，`bin/ucore.img` 为裸二进制。
+- 原有 `grade` 目标引用了压缩包中不存在的 `tools/grade.sh`。
 
 ##### 第二次迭代
 
@@ -207,8 +201,8 @@ Post-Condition：能够解释 ucore.img 的完整生成链，并提供可重复�
 
 **最终结果：**
 
-- ✅ `make grade` 输出 PASS。
-- ✅ 自动检查入口地址、关键符号、OpenSBI 下一跳和内核启动信息。
+- `make grade` 输出 PASS。
+- 自动检查入口地址、关键符号、OpenSBI 下一跳和内核启动信息。
 
 ---
 
@@ -327,9 +321,9 @@ SP_AT_KERN_INIT=0x80203000
 BOOTSTACKTOP=0x80203000
 ```
 
-- ✅ 链接地址与实测一致。
-- ✅ 内核栈初始化正确。
-- ✅ 尾调用到达预期 C 入口。
+- 链接地址与实测一致。
+- 内核栈初始化正确。
+- 尾调用到达预期 C 入口。
 
 ---
 
@@ -431,10 +425,10 @@ Post-Condition：make qemu 输出内核消息，make grade 自动通过。
 
 **最终结果：**
 
-- ✅ OpenSBI 下一跳为 `0x80200000`。
-- ✅ 内核输出启动信息。
-- ✅ GDB 从 `0x1000` 跟踪到 `kern_entry` 和 `kern_init`。
-- ✅ `sp` 与 `bootstacktop` 完全相等。
+- OpenSBI 下一跳为 `0x80200000`。
+- 内核输出启动信息。
+- GDB 从 `0x1000` 跟踪到 `kern_entry` 和 `kern_init`。
+- `sp` 与 `bootstacktop` 完全相等。
 
 ---
 
@@ -509,11 +503,3 @@ OS 原理中很重要、但本实验尚未涉及的内容包括：中断与异�
 5. **自动化可重复验证。** 将手工检查转化为本组自定义的 `make grade` 验收流程，减少环境变化或后续修改造成的回归，同时明确它不等同于课程官方评分。
 
 ---
-
-## 参考资料
-
-1. 课程提供的 `lab1.zip` 与实验报告模板。
-2. [uCore OS(on RISC-V64) 最小可执行内核指导](https://nankai.gitbook.io/ucore-os-on-risc-v64/lab0.5)
-3. [RISC-V Privileged Architecture Specification](https://github.com/riscv/riscv-isa-manual)
-4. [OpenSBI 官方仓库](https://github.com/riscv-software-src/opensbi)
-5. [另一组 Lab1 公开仓库（仅用于横向比较报告覆盖面，不作为课程依据）](https://github.com/lujilanfan/OS/tree/lab1)
