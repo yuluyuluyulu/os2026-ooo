@@ -195,7 +195,10 @@ Post-Condition：OpenSBI 输出 Next Address=0x80200000，随后出现
 
 [SPECIFICATION]
 Success Output：
-PASS: lab1 builds, links at 0x80200000, and boots through OpenSBI.
+PASS: custom lab1 acceptance builds, links at 0x80200000, and boots through OpenSBI.
+
+Boundary：该脚本是小组为复现构建、地址和启动现象编写的本地验收工具，
+不得将其结果表述为课程官方评分或分数。
 ````
 
 ## 9. 报告与仓库交付提示词
@@ -220,4 +223,45 @@ report/prompt.md；测试截图放入 report/images/。
 [SPECIFICATION]
 Post-Condition：远程 GitHub lab1 分支包含可审核的完整交付物；输出提交号、
 测试摘要和分支链接。
+````
+
+## 10. 同伴仓库横向复核提示词
+
+````markdown
+[TASK]
+只读审阅 https://github.com/lujilanfan/OS 的 lab1 分支，检查本组报告是否遗漏
+有助于解释课程代码的关键证据或答辩易错点。
+
+[RELY]
+- 教师提供的 lab1.zip、模板和本组实测结果始终具有更高优先级。
+- 同伴仓库只用于横向比较，不保证内容、环境版本或结论正确。
+
+[GUARANTEE]
+- 不复制对方报告文本、图片或未经本组复测的数据。
+- 只吸收可由本组源码、objdump、QEMU 和 GDB 证据独立验证的分析角度。
+- 明确两项正式练习：entry.S 指令解释，以及复位到内核入口的 GDB 跟踪。
+- 区分构建链与运行链；补充 cprintf 到 SBI ecall 的字符输出链。
+- 明确自定义 make grade 只是本地验收，不冒充课程官方评分。
+
+[SPECIFICATION]
+Post-Condition：报告结构更清晰、技术边界更准确，所有新增事实均能由本组代码
+或实测证据支持，并在参考资料中标明同伴仓库仅供横向比较。
+````
+
+## 11. 答辩准备提示词（仅本地使用）
+
+````markdown
+[TASK]
+依据最终 code/、report/report.md 与实测日志，为三位成员分别准备 Lab1 答辩提纲，
+涵盖个人分工、核心原理、关键地址、常见追问、现场演示和容易说错的边界。
+
+[GUARANTEE]
+- 回答必须简洁、可口述，并给出追问时的技术依据。
+- 三人都掌握完整启动链，各自重点对应构建、入口/链接、OpenSBI/GDB。
+- 不声称实现了当前源码中不存在的中断、输入、内存管理或进程功能。
+- 不把自定义 make grade 称为课程官方评分。
+- 答辩材料保存为仓库外或 Git 本地排除文件，不提交到 GitHub。
+
+[SPECIFICATION]
+Post-Condition：生成一份可直接复习和演示的本地 Markdown 文档。
 ````

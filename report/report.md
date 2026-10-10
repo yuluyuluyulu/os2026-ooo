@@ -97,6 +97,15 @@ kern_entry 建立内核栈
 6. **建立 C 运行环境**：`kern_entry` 设置栈指针，`kern_init` 清零 BSS 并通过 SBI 控制台输出信息。
 7. **用 GDB 验证推理**：观察 `0x1000` 复位代码、`0x80200000` 内核入口以及进入 `kern_init` 时的栈指针，形成闭环验证。
 
+### 3.3 正式练习与补充分析的对应关系
+
+根据课程压缩包中的代码与实验要求，本报告将两项正式练习明确对应为：
+
+- **练习 1：解释 `entry.S` 中 `la sp, bootstacktop` 与 `tail kern_init` 的作用，并验证内核栈建立过程。**
+- **练习 2：使用 GDB 跟踪 QEMU 从复位地址到 `kern_entry`、`kern_init` 的执行过程。**
+
+Makefile、链接脚本、OpenSBI 和 SBI 控制台调用属于完成上述练习所必需的工程背景与补充分析，用于把“源码解释”落实为可构建、可运行、可复现的证据链。
+
 ---
 
 ## 四、实验内容与实现
@@ -203,7 +212,7 @@ Post-Condition：能够解释 ucore.img 的完整生成链，并提供可重复�
 
 ---
 
-### 功能模块：链接脚本、内存布局与内核入口
+### 练习 1：链接脚本、内存布局与内核入口
 
 **负责人：** 2414063-尹天宇
 
@@ -257,8 +266,25 @@ kern_entry:
 #### `kern_init` 的作用
 
 1. 使用链接器提供的 `edata` 和 `end` 清零 BSS，满足 C 语言“未显式初始化的静态存储期对象初值为 0”的语义。
-2. 调用 `cprintf`，经 `cons_putc` 和 `sbi_console_putchar` 最终执行 `ecall`，请求 OpenSBI 输出字符。
+2. 调用 `cprintf`，经格式化输出、控制台与 SBI 封装，最终执行 `ecall`，请求 OpenSBI 输出字符。
 3. 进入无限循环，保证 `noreturn` 约定成立。
+
+字符输出的实际调用链为：
+
+```text
+kern_init
+  -> cprintf
+  -> vcprintf
+  -> vprintfmt
+  -> cputch
+  -> cons_putc
+  -> sbi_console_putchar
+  -> sbi_call（a7/x17=1，a0/x10=待输出字符）
+  -> ecall
+  -> OpenSBI legacy console
+```
+
+本次构建中 `edata=end=0x80203008`，因此 BSS 清零循环实际执行零次；这不影响初始化代码的正确性，当后续加入未初始化全局变量时该机制会生效。另需注意，当前 `cons_init`、`serial_intr` 和 `kbd_intr` 仍为空实现，源码只验证了字符输出链，不能据此声称已经实现串口/键盘输入或中断处理。
 
 #### 关于规范主引导扇区
 
@@ -307,7 +333,7 @@ BOOTSTACKTOP=0x80203000
 
 ---
 
-### 功能模块：QEMU、OpenSBI 启动与 GDB 验证
+### 练习 2：QEMU、OpenSBI 启动与 GDB 验证
 
 **负责人：** 2412763-王泽鼎
 
@@ -330,6 +356,15 @@ void sbi_console_putchar(unsigned char ch);
 3. 本实验使用 `-kernel bin/ucore.img`。镜像实际由 QEMU 装入 `0x80200000`，并将该地址作为 OpenSBI 的下一阶段入口；不是由实验中的 OpenSBI 代码逐扇区读取硬盘。
 4. OpenSBI 将下一特权级设置为 S-mode，准备参数和 CSR 后执行 `mret`，控制权转移到 `kern_entry`。
 5. 内核设置栈、进入 `kern_init`，清零 BSS，并通过 SBI legacy console 调用输出 `(THU.CST) os is loading ...`。
+
+需要区分两条互相衔接但职责不同的链路：
+
+```text
+构建链：源码 -> 目标文件 -> bin/kernel (ELF) -> bin/ucore.img (裸镜像)
+运行链：QEMU 复位代码 -> OpenSBI -> kern_entry -> kern_init -> SBI 控制台
+```
+
+其中 QEMU 负责创建虚拟机并装入镜像，OpenSBI 负责 M 态平台初始化及向 S 态内核交接；因此不能把本实验描述为“OpenSBI 从磁盘逐扇区读取内核”。
 
 #### 兼容性问题与修复
 
@@ -429,7 +464,7 @@ GDB 验证了复位地址、内核入口、C 入口和栈顶地址。
 
 ![GDB 验证结果](./images/04-gdb-verification.png)
 
-### 5.5 自动评分测试
+### 5.5 自定义自动验收（非课程官方评分）
 
 执行：
 
@@ -437,14 +472,14 @@ GDB 验证了复位地址、内核入口、C 入口和栈顶地址。
 make grade
 ```
 
-测试脚本重新构建项目，检查链接地址和关键符号，短时运行 QEMU，并验证 OpenSBI 下一跳和内核输出。
+课程压缩包的原 `grade` 目标引用了未随包提供的 `tools/grade.sh`。为保证交付可复现，本组编写了 `tools/test_lab1.sh`，并让 `make grade` 调用它。该脚本会重新构建项目、检查链接地址和关键符号、短时运行 QEMU，并验证 OpenSBI 下一跳和内核输出；它是本组的本地验收工具，不代表课程官方评分或分数。
 
 ![make grade 通过](./images/05-grade-pass.png)
 
 最终结果：
 
 ```text
-PASS: lab1 builds, links at 0x80200000, and boots through OpenSBI.
+PASS: custom lab1 acceptance builds, links at 0x80200000, and boots through OpenSBI.
 ```
 
 ---
@@ -471,7 +506,7 @@ OS 原理中很重要、但本实验尚未涉及的内容包括：中断与异�
 2. **让结论落到工程证据。** 对入口地址、栈顶和启动链的解释不能只依赖文字，应使用 `objdump`、OpenSBI 输出和 GDB 数据交叉验证。
 3. **提示词中提供边界。** 明确 `[RELY]`、`[GUARANTEE]` 和 `[SPECIFICATION]`，可以避免 AI 引入与当前实验版本不一致的模块。
 4. **保留失败过程。** “能编译但不能启动”不是无效结果；`Next Address = 0x0` 正是定位 QEMU 参数问题的关键证据。
-5. **自动化可重复验证。** 将手工检查转化为 `make grade`，减少环境变化或后续修改造成的回归。
+5. **自动化可重复验证。** 将手工检查转化为本组自定义的 `make grade` 验收流程，减少环境变化或后续修改造成的回归，同时明确它不等同于课程官方评分。
 
 ---
 
@@ -481,3 +516,4 @@ OS 原理中很重要、但本实验尚未涉及的内容包括：中断与异�
 2. [uCore OS(on RISC-V64) 最小可执行内核指导](https://nankai.gitbook.io/ucore-os-on-risc-v64/lab0.5)
 3. [RISC-V Privileged Architecture Specification](https://github.com/riscv/riscv-isa-manual)
 4. [OpenSBI 官方仓库](https://github.com/riscv-software-src/opensbi)
+5. [另一组 Lab1 公开仓库（仅用于横向比较报告覆盖面，不作为课程依据）](https://github.com/lujilanfan/OS/tree/lab1)

@@ -53,7 +53,7 @@ check_log "$LAYOUT_LOG" "bootstacktop"
 check_log "$QEMU_LOG" "Domain0 Next Address      : 0x0000000080200000"
 check_log "$QEMU_LOG" "(THU.CST) os is loading ..."
 
-echo "PASS: lab1 builds, links at 0x80200000, and boots through OpenSBI."
+echo "PASS: custom lab1 acceptance builds, links at 0x80200000, and boots through OpenSBI."
 echo "Build log:  $BUILD_LOG"
 echo "Layout log: $LAYOUT_LOG"
 echo "QEMU log:   $QEMU_LOG"
