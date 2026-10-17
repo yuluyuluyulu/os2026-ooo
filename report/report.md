@@ -4,502 +4,359 @@
 
 | 项目 | 内容 |
 |------|------|
-| **实验名称** | Lab 1：最小可执行内核与 OpenSBI 启动分析 |
+| **实验名称** | Lab 2：物理内存管理与 Best-Fit 连续页分配 |
 | **小组成员** | 2412930-林永圣、2414063-尹天宇、2412763-王泽鼎 |
-| **完成日期** | 2026-10-10 |
+| **完成日期** | 2026-10-18 |
 
 ### 小组分工
 
 | 成员 | 负责的练习/模块 |
 |------|----------------|
-| 2412930-林永圣 | 构建环境检查；分析 Makefile 与 `ucore.img` 生成流程；维护自动构建测试 |
-| 2414063-尹天宇 | 分析 `kernel.ld`、内存布局、内核栈及 `entry.S` 入口代码 |
-| 2412763-王泽鼎 | 分析 QEMU/OpenSBI 启动过程；完成 GDB 调试验证、截图和交付检查 |
+| 2412930-林永圣 | 物理内存探测结果接入、`page_init`、页描述符数组与空闲区初始化 |
+| 2414063-尹天宇 | Best-Fit 分配器的初始化、分配、释放、相邻块合并和管理器注册 |
+| 2412763-王泽鼎 | Sv39 启动映射兼容性、Makefile/QEMU/GDB 调试、自动测试与报告证据整理 |
 
 ---
 
 ## 一、实验目的
 
-本实验的主要目的是：
-
-1. 熟悉 RISC-V64 裸机内核的交叉编译、链接、镜像生成和模拟运行流程。
-2. 理解链接脚本如何控制内核入口、装载地址以及 `.text`、`.rodata`、`.data`、`.bss` 等段的布局。
-3. 理解 QEMU、OpenSBI 和 uCore 内核之间的启动与特权级交接关系。
-4. 掌握 `kern_entry` 建立内核栈并转入 C 函数 `kern_init` 的过程。
-5. 使用 GDB 验证复位向量、内核入口、栈指针与关键符号地址。
-6. 学习使用 AI 辅助完成需求核验、兼容性排错、测试设计和实验报告整理。
+1. 理解物理地址、虚拟地址、页、页帧和页描述符之间的关系。
+2. 理解 RISC-V Sv39 地址翻译、`satp` 和 `sfence.vma` 的作用。
+3. 根据设备树给出的物理内存范围建立 `struct Page` 描述符数组。
+4. 正确排除 OpenSBI、内核镜像和页描述符数组占用的空间，并把剩余整页交给物理内存管理器。
+5. 实现 Best-Fit 连续物理页分配算法，并在释放时按地址排序、合并相邻空闲块。
+6. 使用 QEMU、课程随包测试和 GDB 验证从物理入口切换到高地址内核以及内存分配器行为。
 
 ---
 
 ## 二、实验环境
 
-### 2.1 软件与工具链
+| 组件 | 实际环境/用途 |
+|------|---------------|
+| 宿主环境 | Windows + WSL2 Ubuntu |
+| 目标架构 | RISC-V 64 位（RV64） |
+| 交叉工具链 | `riscv64-unknown-elf-gcc/ld/objcopy` |
+| 模拟器与固件 | `qemu-system-riscv64` + OpenSBI v1.0 |
+| 调试器 | `riscv64-unknown-elf-gdb`，目标架构 `riscv:rv64` |
+| 构建工具 | GNU Make |
+| 实验代码 | 课程提供的 `lab2.zip` |
+| AI 辅助工具 | Codex 桌面端；结果由源码、测试与调试共同复核 |
 
-| 组件 | 版本/配置 |
-|------|-----------|
-| 宿主环境 | Windows + WSL2 Ubuntu 22.04 |
-| 交叉编译器 | `riscv64-unknown-elf-gcc 15.1.0` |
-| 模拟器 | `qemu-system-riscv64 7.0.0` |
-| 构建工具 | GNU Make 4.3 |
-| 调试器 | `riscv64-unknown-elf-gdb 16.3.90` |
-| 版本管理 | Git 2.34.1 |
-| 实验代码 | 课程提供的 `lab1.zip` |
-
-### 2.2 使用的 AI 工具
-
-| 成员 | AI 编程工具 | 底层模型 | 备注 |
-|------|------------|---------|------|
-| 2412930-林永圣 | Codex 桌面端 | OpenAI GPT-5（Codex） |  Makefile 分析和自动测试设计 |
-| 2414063-尹天宇 | Codex 桌面端 | OpenAI GPT-5（Codex） |  链接脚本和入口汇编分析 |
-| 2412763-王泽鼎 | Codex 桌面端 | OpenAI GPT-5（Codex） |  OpenSBI/GDB 验证和报告整理 |
-
-**说明：** 三名成员共同审核 AI 生成内容；最终结论均以课程压缩包中的实际代码、交叉编译结果和 QEMU/GDB 实测数据为准。
+课程指导书参考：<https://nankai.gitbook.io/ucore-os-on-risc-v64/lab2>
 
 ---
 
-## 三、实验整体逻辑分析
+## 三、实验整体逻辑
 
-### 3.1 本章节的逻辑主线
-
-本实验围绕“一个最小 RISC-V64 内核如何从源代码变为可启动镜像并获得 CPU 控制权”展开。整个过程形成如下主线：
+### 3.1 从启动到物理页分配
 
 ```text
-C/汇编源文件
-    ↓ riscv64-unknown-elf-gcc
-ELF 目标文件（obj/*.o）
-    ↓ riscv64-unknown-elf-ld + kernel.ld
-带符号的内核 ELF（bin/kernel）
-    ↓ riscv64-unknown-elf-objcopy
-裸二进制镜像（bin/ucore.img）
-    ↓ QEMU -kernel
-OpenSBI 在 M 态初始化平台
-    ↓ 切换至 S 态并跳转 0x80200000
-kern_entry 建立内核栈
-    ↓ tail kern_init
-清零 BSS，通过 SBI 输出启动信息
+QEMU 加载 OpenSBI 与 ucore.img
+    ↓
+OpenSBI 在 M-mode 初始化平台
+    ↓ 跳转到物理地址 0x80200000，进入 S-mode
+kern_entry 保存 hartid/DTB 地址
+    ↓
+设置 Sv39 根页表，刷新 TLB，跳到高虚拟地址
+    ↓
+kern_init 解析 DTB，得到物理内存范围
+    ↓
+pmm_init 选择 Best-Fit 管理器
+    ↓
+page_init 建立 Page 数组并登记可用空闲页
+    ↓
+Best-Fit 自检、课程注入测试
 ```
 
-这一过程把编译链接、内存布局、RISC-V 特权级、固件接口和 C 运行环境串联起来，是后续中断、内存管理、进程和文件系统实验的共同启动基础。
+实验把“地址翻译机制”和“物理页分配策略”分开：启动页表负责让 CPU 能用虚拟地址访问内核；`pmm_manager` 负责管理哪些物理页空闲、如何分配和回收。
 
-### 3.2 功能的逐步实现
+### 3.2 核心数据结构
 
-1. **检查交叉编译环境**：先确认 GCC、binutils、Make、QEMU 和 GDB 均可用，因为后续所有验证都依赖工具链。
-2. **编译源文件**：将汇编和 C 文件编译成 RISC-V64 ELF 目标文件，使不同模块可以独立构建。
-3. **按链接脚本组织内核**：规定入口为 `kern_entry`、基地址为 `0x80200000`，并按只读代码、只读数据、可写数据、零初始化数据的顺序布局。
-4. **生成裸镜像**：保留 `bin/kernel` 供调试，再通过 `objcopy` 生成 QEMU 可加载的 `bin/ucore.img`。
-5. **由 OpenSBI 启动内核**：QEMU 准备虚拟硬件和镜像，OpenSBI 在 M 态初始化平台，随后切换到 S 态并跳转内核入口。
-6. **建立 C 运行环境**：`kern_entry` 设置栈指针，`kern_init` 清零 BSS 并通过 SBI 控制台输出信息。
-7. **用 GDB 验证推理**：观察 `0x1000` 复位代码、`0x80200000` 内核入口以及进入 `kern_init` 时的栈指针，形成闭环验证。
-
-### 3.3 正式练习与补充分析的对应关系
-
-根据课程压缩包中的代码与实验要求，本报告将两项正式练习明确对应为：
-
-- **练习 1：解释 `entry.S` 中 `la sp, bootstacktop` 与 `tail kern_init` 的作用，并验证内核栈建立过程。**
-- **练习 2：使用 GDB 跟踪 QEMU 从复位地址到 `kern_entry`、`kern_init` 的执行过程。**
-
-Makefile、链接脚本、OpenSBI 和 SBI 控制台调用属于完成上述练习所必需的工程背景与补充分析，用于把“源码解释”落实为可构建、可运行、可复现的证据链。
-
----
-
-## 四、实验内容与实现
-
-### 功能模块：Makefile 构建与镜像生成
-
-**负责人：** 2412930-林永圣
-
-#### 模块功能描述
-
-**涉及的构建目标：**
-
-```make
-bin/kernel
-bin/ucore.img
-qemu
-debug
-gdb
-grade
-clean
-```
-
-**功能说明：** Makefile 负责发现源文件、交叉编译、链接 ELF、生成裸镜像，并提供运行、调试和自动测试入口。
-
-#### `ucore.img` 的生成过程
-
-1. `tools/function.mk` 中的宏遍历 `libs`、`kern/init`、`kern/libs`、`kern/driver` 等目录，将 `.c` 和 `.S` 源文件映射到 `obj/` 下的目标文件。
-2. 每个源文件使用类似命令编译：
-
-   ```bash
-   riscv64-unknown-elf-gcc -mcmodel=medany -std=gnu99 \
-     -fno-builtin -Wall -O2 -nostdinc -fno-stack-protector \
-     -ffunction-sections -fdata-sections -g -Ilibs ... \
-     -c kern/init/init.c -o obj/kern/init/init.o
-   ```
-
-   - `-mcmodel=medany`：生成适合内核高地址装载的 PC 相对寻址代码。
-   - `-std=gnu99`：使用 GNU C99。
-   - `-fno-builtin`：不把常用函数替换为宿主标准库内建实现。
-   - `-nostdinc`：不搜索宿主系统标准头文件，避免引入不适用于裸机的定义。
-   - `-fno-stack-protector`：关闭依赖运行时支持的栈保护代码。
-   - `-ffunction-sections -fdata-sections`：每个函数、数据放入独立节，便于链接器删除未使用内容。
-   - `-g`：保留调试信息供 GDB 使用。
-   - `-c`：只编译，不进行链接。
-3. 目标文件通过以下命令链接：
-
-   ```bash
-   riscv64-unknown-elf-ld -m elf64lriscv -nostdlib --gc-sections \
-     -T tools/kernel.ld -o bin/kernel <目标文件列表>
-   ```
-
-   - `-m elf64lriscv`：输出 64 位小端 RISC-V ELF。
-   - `-nostdlib`：不链接宿主标准库和启动文件。
-   - `--gc-sections`：删除未被引用的节。
-   - `-T tools/kernel.ld`：使用课程提供的内核链接脚本。
-4. `objdump -S` 生成带源码的反汇编文件，`objdump -t` 生成符号表，便于静态分析和调试。
-5. 最后执行：
-
-   ```bash
-   riscv64-unknown-elf-objcopy bin/kernel --strip-all -O binary bin/ucore.img
-   ```
-
-   `--strip-all` 去除符号和调试信息，`-O binary` 把 ELF 转换为只包含可装载内容的裸二进制镜像。最终同时保留 `bin/kernel`（调试）和 `bin/ucore.img`（启动）。
-
-#### 最终提示词
-
-````markdown
-[TASK]
-基于课程提供的 lab1.zip，逐条分析 Makefile 中从源文件到
-bin/kernel、bin/ucore.img 的构建依赖和实际命令。
-
-[RELY]
-- 只使用压缩包内的 Makefile、tools/function.mk 与实测 make V= 输出。
-- 目标架构为 riscv64，链接脚本为 tools/kernel.ld。
-
-[GUARANTEE]
-- 不修改内核业务逻辑。
-- 对每个关键编译、链接、objcopy 参数给出含义和结果。
-- 用实际产物和 objdump 结果验证结论。
-
-[SPECIFICATION]
-Pre-Condition：WSL 中已安装 RISC-V 交叉工具链。
-Post-Condition：能够解释 ucore.img 的完整生成链，并提供可重复构建命令。
-````
-
-#### 实现迭代过程
-
-##### 第一次迭代
-
-**最终结果：**
-
-- 压缩包原始代码能够交叉编译并生成两个目标文件。
-- `bin/kernel` 为 ELF64 little-RISC-V，`bin/ucore.img` 为裸二进制。
-- 原有 `grade` 目标引用了压缩包中不存在的 `tools/grade.sh`。
-
-##### 第二次迭代
-
-**问题解决策略：** 增加 `tools/test_lab1.sh`，让 `make grade` 自动完成清理、编译、段布局检查、QEMU 短时运行和关键输出断言。
-
-**最终结果：**
-
-- `make grade` 输出 PASS。
-- 自动检查入口地址、关键符号、OpenSBI 下一跳和内核启动信息。
-
----
-
-### 练习 1：链接脚本、内存布局与内核入口
-
-**负责人：** 2414063-尹天宇
-
-#### 模块功能描述
-
-**涉及的符号/函数：**
-
-```asm
-kern_entry
-bootstack
-bootstacktop
-```
+`struct Page` 并不是一页内存本身，而是某个物理页帧的管理记录：
 
 ```c
-int kern_init(void) __attribute__((noreturn));
+struct Page {
+    int ref;
+    uint64_t flags;
+    unsigned int property;
+    list_entry_t page_link;
+};
 ```
 
-#### `kernel.ld` 逐项分析
+- `ref`：页引用计数。
+- `PG_reserved`：该页被内核等占用，不能分配。
+- `PG_property`：该描述符是一个空闲连续块的首元素。
+- `property`：仅在空闲块首元素中有效，表示连续空闲页数。
+- `page_link`：把各空闲块首元素连接成双向链表。
 
-| 链接脚本内容 | 含义 |
-|-------------|------|
-| `OUTPUT_ARCH(riscv)` | 指定输出文件的体系结构为 RISC-V。 |
-| `ENTRY(kern_entry)` | 将 ELF 入口符号设为 `kern_entry`。 |
-| `BASE_ADDRESS = 0x80200000;` | 定义内核预期装载基地址。 |
-| `. = BASE_ADDRESS;` | 把链接位置计数器设置到内核基地址。 |
-| `.text : { ... }` | 合并入口、普通代码、stub 和链接一次性代码节；入口节优先排列。 |
-| `PROVIDE(etext = .);` | 导出代码段结束符号 `etext`。 |
-| `.rodata : { ... }` | 放置字符串常量等只读数据。 |
-| `. = ALIGN(0x1000);` | 将后续可写数据按 4 KiB 页边界对齐。 |
-| `.data : { ... }` | 放置已初始化的全局/静态可写数据。 |
-| `.sdata : { ... }` | 放置适合全局指针快速访问的小数据。 |
-| `PROVIDE(edata = .);` | 导出已初始化数据的结束位置。 |
-| `.bss : { ... }` | 放置零初始化和未初始化的全局/静态数据。 |
-| `PROVIDE(end = .);` | 导出内核静态映像结束位置。 |
-| `/DISCARD/ : { *(.eh_frame .note.GNU-stack) }` | 丢弃裸机内核不需要的异常展开和宿主栈说明节。 |
-
-实测 `.text` 的 VMA/LMA 均从 `0x80200000` 开始，`kern_entry=0x80200000`，`kern_init=0x8020000a`，`bootstack=0x80201000`，`bootstacktop=0x80203000`。
-
-#### `entry.S` 两条核心指令
-
-```asm
-kern_entry:
-    la sp, bootstacktop
-    tail kern_init
-```
-
-- `la sp, bootstacktop` 是伪指令，将链接器确定的内核栈顶地址写入 `sp`。C 函数需要合法栈来保存调用现场和局部变量，因此它建立了从固件环境进入 C 运行环境的基本条件。
-- `tail kern_init` 是尾调用伪指令，本实验反汇编为直接跳转到 `kern_init`。由于 `kern_init` 声明为 `noreturn` 并永久循环，不需要保存返回地址。
-- `.align PGSHIFT` 把 `bootstack` 按页对齐，`.space KSTACKSIZE` 预留内核栈空间，`bootstacktop` 位于其高地址端。RISC-V 栈向低地址增长，因此把 `sp` 初始化到栈顶是正确的。
-
-#### `kern_init` 的作用
-
-1. 使用链接器提供的 `edata` 和 `end` 清零 BSS，满足 C 语言“未显式初始化的静态存储期对象初值为 0”的语义。
-2. 调用 `cprintf`，经格式化输出、控制台与 SBI 封装，最终执行 `ecall`，请求 OpenSBI 输出字符。
-3. 进入无限循环，保证 `noreturn` 约定成立。
-
-字符输出的实际调用链为：
-
-```text
-kern_init
-  -> cprintf
-  -> vcprintf
-  -> vprintfmt
-  -> cputch
-  -> cons_putc
-  -> sbi_console_putchar
-  -> sbi_call（a7/x17=1，a0/x10=待输出字符）
-  -> ecall
-  -> OpenSBI legacy console
-```
-
-本次构建中 `edata=end=0x80203008`，因此 BSS 清零循环实际执行零次；这不影响初始化代码的正确性，当后续加入未初始化全局变量时该机制会生效。另需注意，当前 `cons_init`、`serial_intr` 和 `kbd_intr` 仍为空实现，源码只验证了字符输出链，不能据此声称已经实现串口/键盘输入或中断处理。
-
-#### 关于规范主引导扇区
-
-传统 BIOS/x86 环境中，规范主引导扇区大小为 512 字节，末尾两个字节为 `0x55`、`0xAA`，BIOS 会把它装入约定地址并执行。当前 RISC-V 实验不采用 BIOS/MBR 启动链，也不生成硬盘主引导扇区；它生成裸内核镜像，由 QEMU/OpenSBI 启动。因此该知识点用于比较两种启动模型，不能直接套用到本实验命令。
-
-#### 最终提示词
-
-````markdown
-[TASK]
-结合 tools/kernel.ld、kern/init/entry.S、kern/init/init.c 和最终 ELF，
-解释内核地址布局以及从汇编入口进入 C 代码的过程。
-
-[RELY]
-- BASE_ADDRESS=0x80200000。
-- bootstack 由 .align PGSHIFT 与 .space KSTACKSIZE 定义。
-- kern_init 被声明为 noreturn。
-
-[GUARANTEE]
-- 对 kernel.ld 的每项指令给出含义。
-- 通过 objdump 符号表和反汇编验证所有关键地址。
-- 区分传统 MBR 引导与本实验 OpenSBI 启动方式。
-
-[SPECIFICATION]
-Post-Condition：说明 la sp 与 tail 的操作、目的和必要性，并证明进入
-kern_init 时 sp 等于 bootstacktop。
-````
-
-#### 实现迭代过程
-
-##### 第一次迭代
-
-**最终结果：** 静态分析得到入口、栈和各段布局，并成功编译 ELF。
-
-##### 第二次迭代
-
-**关键改进点：** 不只依赖源码推测，而是加入 `objdump -h/-t/-d` 和 GDB 检查。实测进入 `kern_init` 时：
-
-```text
-SP_AT_KERN_INIT=0x80203000
-BOOTSTACKTOP=0x80203000
-```
-
-- 链接地址与实测一致。
-- 内核栈初始化正确。
-- 尾调用到达预期 C 入口。
+`free_area_t` 同时维护空闲块链表 `free_list` 和空闲页总数 `nr_free`。链表按物理地址递增排列，方便释放时判断前后块是否相邻。
 
 ---
 
-### 练习 2：QEMU、OpenSBI 启动与 GDB 验证
+## 四、功能一：物理内存初始化
 
-**负责人：** 2412763-王泽鼎
+**负责人：2412930-林永圣**
 
-#### 模块功能描述
+### 4.1 功能目标
 
-**涉及的函数：**
+`page_init` 需要把 DTB 报告的物理内存转换成内核可管理的页集合，同时保证固件、内核和管理元数据不会被误分配。
 
-```c
-uint64_t sbi_call(uint64_t sbi_type,
-                  uint64_t arg0,
-                  uint64_t arg1,
-                  uint64_t arg2);
-void sbi_console_putchar(unsigned char ch);
-```
+本机 DTB 实测结果为：
 
-#### 启动过程
+- 起始物理地址：`0x80000000`
+- 大小：`0x08000000`，即 128 MiB
+- 结束边界：`0x88000000`（半开区间，不包含该地址）
+- 页大小：4 KiB
+- 总页号上界：`PPN(0x88000000)`
 
-1. QEMU `virt` 机器复位后，PC 位于 `0x1000` 的 MROM 复位代码。最初几条指令读取 `mhartid` 和 MROM 中的启动参数，然后跳转固件入口。
-2. OpenSBI 位于 `0x80000000`，在 M 态初始化 HART、时钟、控制台、PMP 和 trap 委托等平台功能。
-3. 本实验使用 `-kernel bin/ucore.img`。镜像实际由 QEMU 装入 `0x80200000`，并将该地址作为 OpenSBI 的下一阶段入口；不是由实验中的 OpenSBI 代码逐扇区读取硬盘。
-4. OpenSBI 将下一特权级设置为 S-mode，准备参数和 CSR 后执行 `mret`，控制权转移到 `kern_entry`。
-5. 内核设置栈、进入 `kern_init`，清零 BSS，并通过 SBI legacy console 调用输出 `(THU.CST) os is loading ...`。
+### 4.2 实现过程
 
-需要区分两条互相衔接但职责不同的链路：
+1. 将 `va_pa_offset` 设置为 `PHYSICAL_MEMORY_OFFSET`，使 `PADDR(kva)` 能把高虚拟地址换算为物理地址。
+2. 从 `get_memory_base()` 和 `get_memory_size()` 取得 DTB 的探测结果，计算物理内存半开区间。
+3. 设置 `npage = PPN(mem_end)`；`pages[0]` 对应 `nbase = PPN(0x80000000)`，因此转换关系为：
 
-```text
-构建链：源码 -> 目标文件 -> bin/kernel (ELF) -> bin/ucore.img (裸镜像)
-运行链：QEMU 复位代码 -> OpenSBI -> kern_entry -> kern_init -> SBI 控制台
-```
+   ```text
+   page2ppn(page) = page - pages + nbase
+   ```
 
-其中 QEMU 负责创建虚拟机并装入镜像，OpenSBI 负责 M 态平台初始化及向 S 态内核交接；因此不能把本实验描述为“OpenSBI 从磁盘逐扇区读取内核”。
+4. 将 `pages` 放在链接器符号 `end` 之后并按 4 KiB 对齐，为每个 DRAM 页建立一个 `struct Page`。
+5. 先把全部描述符标记为保留。这样内核镜像、页描述符数组及其对齐空隙默认不会进入空闲链表。
+6. 计算描述符数组结束后的第一个完整物理页，只将 `[free_mem, mem_end)` 交给 `init_memmap`。
 
-#### 兼容性问题与修复
+### 4.3 前置与后置状态
 
-压缩包原 Makefile 使用：
+**前置条件：** `dtb_init` 已成功解析内存节点；链接器提供 `end`；高地址内核映射已经生效。
 
-```make
--device loader,file=$(UCOREIMG),addr=0x80200000
-```
+**成功后的状态：**
 
-在当前 QEMU/OpenSBI 组合中，虽然镜像被写入内存，但 OpenSBI 显示 `Domain0 Next Address = 0x0`，不会进入内核。改为：
+- `va_pa_offset` 正确反映虚实地址差值；
+- `npage` 与 DTB 内存末端一致；
+- `pages` 非空、按页对齐且位于内核末尾之后；
+- 内核尾页和描述符数组所在页仍为 reserved；
+- 空闲链表非空，且 `page2pa/pa2page` 可以往返转换。
 
-```make
--kernel $(UCOREIMG)
-```
-
-之后 `Next Address` 正确变为 `0x80200000`，并出现内核输出。`qemu` 和 `debug` 两个目标均应用了该修复；`gdb` 目标还会在专用 RISC-V GDB 不存在时回退到 `gdb-multiarch`。
-
-#### GDB 观察结果
-
-```text
-RESET_PC=0x1000
-KERN_ENTRY_PC=0x80200000
-KERN_INIT_PC=0x8020000a
-SP_AT_KERN_INIT=0x80203000
-BOOTSTACKTOP=0x80203000
-```
-
-这些数据同时验证了复位链、OpenSBI 交接、链接入口、汇编到 C 的跳转和内核栈设置。
-
-#### 最终提示词
-
-````markdown
-[TASK]
-在 QEMU virt + OpenSBI 环境中运行课程 lab1，并用 GDB 验证从复位向量
-到 kern_entry、kern_init 的控制流和栈指针。
-
-[RELY]
-- 使用课程压缩包及其生成的 bin/kernel、bin/ucore.img。
-- QEMU 版本为 7.0.0，OpenSBI 运行时版本为 0.3。
-
-[GUARANTEE]
-- 先记录原始启动结果，再针对实际证据修改 Makefile。
-- 不修改 entry.S 和 init.c 的实验语义。
-- 验证 PC=0x1000、kern_entry=0x80200000、sp=bootstacktop。
-
-[SPECIFICATION]
-Case 1：若 OpenSBI Next Address 为 0，定位镜像装载与固件跳转参数问题。
-Case 2：若 GDB 不可用，检测专用 GDB 与 gdb-multiarch。
-Post-Condition：make qemu 输出内核消息，make grade 自动通过。
-````
-
-#### 实现迭代过程
-
-##### 第一次迭代
-
-**遇到的问题：**
-
-- 压缩包原始代码编译成功，但 QEMU 仅输出 OpenSBI。
-- `Domain0 Next Address` 为 `0x0`，证明固件没有获得内核入口。
-
-**问题解决策略：** 根据 QEMU 启动参数和 OpenSBI 输出，把 `-device loader` 改为 `-kernel`，并同步修改调试目标。
-
-##### 第二次迭代
-
-**最终结果：**
-
-- OpenSBI 下一跳为 `0x80200000`。
-- 内核输出启动信息。
-- GDB 从 `0x1000` 跟踪到 `kern_entry` 和 `kern_init`。
-- `sp` 与 `bootstacktop` 完全相等。
+若 DTB 内存范围非法、可用空间不足或地址假设不成立，内核使用断言停止，而不是建立可能破坏内核的错误空闲表。
 
 ---
 
-## 五、测试与验证
+## 五、功能二：Best-Fit 连续物理页分配
 
-### 5.1 编译测试
+**负责人：2414063-尹天宇**
 
-执行 `make` 后，全部 C/汇编文件成功编译，生成 `bin/kernel` 和 `bin/ucore.img`。
+### 5.1 算法含义
 
-![编译成功](./images/01-build-success.png)
+请求连续 `n` 页时，Best-Fit 遍历全部空闲块，在所有 `property >= n` 的候选块中选择尺寸最小者。若存在恰好为 `n` 页的块，可以立即停止搜索。该策略尽量避免把很大的空闲块用于很小的请求。
 
-### 5.2 ELF 布局与入口反汇编
+例如空闲块大小依次为 8、3、5 页，请求 4 页：First-Fit 会选择 8 页块，Best-Fit 会选择 5 页块，并留下 1 页空闲块。
 
-`objdump` 显示 `.text` 从 `0x80200000` 开始，关键符号和 `kern_entry` 反汇编与源码、链接脚本一致。
+### 5.2 初始化与注册
 
-![内核布局与入口](./images/02-kernel-layout.png)
+- `best_fit_init` 初始化空闲链表并将 `nr_free` 清零。
+- `best_fit_init_memmap` 清除可用页的 reserved 标志，把整个初始可用区登记为一个空闲块。
+- `init_pmm_manager` 改为选择 `best_fit_pmm_manager`，使上层继续通过统一的 `alloc_pages/free_pages` 机制调用新策略。
 
-### 5.3 QEMU/OpenSBI 启动测试
+### 5.3 分配流程
 
-OpenSBI 显示 `Domain0 Next Address = 0x80200000`，随后内核打印 `(THU.CST) os is loading ...`。截图末尾的 timeout 是自动测试在收集到预期输出后主动结束无限循环内核，并非内核故障。
+1. 断言 `n > 0`。
+2. 若 `n > nr_free`，立即返回 `NULL`，且不得改变链表和计数。
+3. 遍历链表，记录当前满足要求且尺寸最小的块。
+4. 从链表摘除选中的原块。
+5. 若块大于请求，将剩余部分设置为新的空闲块首元素，并放回原地址顺序位置。
+6. 清除已分配块首元素的 `PG_property`，更新 `nr_free`，返回块起始页。
 
-![QEMU 启动结果](./images/03-qemu-boot.png)
+### 5.4 释放与合并
 
-### 5.4 GDB 调试验证
+释放连续 `n` 页时，先检查各页既不是 reserved，也不是其他空闲块的首元素；随后清理引用和属性，把 `base` 标记成新的空闲块首元素。
 
-GDB 验证了复位地址、内核入口、C 入口和栈顶地址。
+新块按地址插入链表后依次尝试：
 
-![GDB 验证结果](./images/04-gdb-verification.png)
+- 若前一块末端等于 `base`，合并到前一块；
+- 若合并后块的末端等于后一块，再合并后一块。
 
-### 5.5 自定义自动验收（非课程官方评分）
+这样一次释放最多完成左右两次合并，避免产生可合并却分散的外部碎片，并保持 `nr_free` 等于所有空闲块 `property` 之和。
+
+---
+
+## 六、Sv39 启动映射与兼容性修正
+
+**负责人：2412763-王泽鼎**
+
+### 6.1 页表与 `satp`
+
+Sv39 使用三级页表，普通页为 4 KiB。根页表一页包含 512 个 8 字节页表项；顶级叶子项可直接映射 1 GiB 区域。`satp` 的 MODE=8 表示 Sv39，低 44 位保存根页表物理页号。修改 `satp` 后使用 `sfence.vma` 刷新旧的 TLB 翻译结果。
+
+内核链接在高虚拟地址 `0xffffffffc0200000`，物理入口为 `0x80200000`，两者相差 `0xffffffff40000000`。
+
+### 6.2 发现的问题
+
+原压缩包使用 `-device loader,file=...,addr=0x80200000`。本机 QEMU/OpenSBI 输出 `Domain0 Next Address = 0x0`，不会把控制权交给内核。改用 `-kernel bin/ucore.img` 后，下一跳变为 `0x80200000`。
+
+随后发现原启动页表只映射高地址区域。CPU 在物理地址 `0x80200000` 执行 `csrw satp` 和 `sfence.vma` 后，下一条指令仍从低地址 PC 取指；若没有临时恒等映射，低地址会立刻变成未映射地址。
+
+### 6.3 修正方法
+
+根页表同时建立两个指向物理 `0x80000000` 的 1 GiB 叶子项：
+
+- VPN[2] = 2：临时恒等映射 `0x80000000 → 0x80000000`，保证开启分页后的过渡指令可执行；
+- VPN[2] = 511：高地址映射 `0xffffffffc0000000 → 0x80000000`，供内核正式运行。
+
+随后汇编代码把 `sp` 和跳转目标设置为高虚拟地址，进入 `kern_init`。GDB 实测 `satp = 0x8000000000080205`：最高位域表示 Sv39，根页表物理页号为 `0x80205`，对应物理地址 `0x80205000`。
+
+---
+
+## 七、实验结果与验证
+
+### 7.1 编译
+
+在 `code/` 中执行：
+
+```bash
+make clean
+make
+```
+
+所有 C/汇编文件均通过 `-Werror` 编译，成功生成 `bin/kernel` 与 `bin/ucore.img`。
+
+![Lab2 编译成功](images/01-build-success.png)
+
+### 7.2 QEMU 启动和内存初始化
+
+执行 `make qemu` 后，实测关键输出：
+
+```text
+Domain0 Next Address      : 0x0000000080200000
+Domain0 Next Mode         : S-mode
+Physical Memory from DTB:
+  Base: 0x0000000080000000
+  Size: 0x0000000008000000 (128 MB)
+memory management: best_fit_pmm_manager
+free memory: 0x0000000080347000 - 0x0000000088000000 (31929 pages)
+check_alloc_page() succeeded!
+```
+
+![QEMU 启动与物理内存初始化](images/02-qemu-memory-init.png)
+
+末尾的 timeout 终止信息是测试脚本主动结束 QEMU；内核按设计进入永久循环，并非崩溃。
+
+### 7.3 课程随包测试
+
+执行 `make grade`。该目标复制代码到 `/tmp/lab2_grade`，注入压缩包自带的测试文件，再重新编译运行；未修改 `basic_check`、`best_fit_check` 或注入测试内容。
+
+```text
+-check page init: OK
+-check best fit:  OK
+Total Score: 20/20
+```
+
+![课程随包测试 20/20](images/03-grade-20-of-20.png)
+
+该分数表示本地压缩包附带测试全部通过，不替代教师平台的最终评分。
+
+### 7.4 GDB 调试
 
 执行：
+
+```bash
+sh tools/run_gdb_evidence.sh
+```
+
+调试结果形成了完整的地址切换证据：
+
+- 复位 PC：`0x1000`；
+- OpenSBI 交接后的物理入口：`0x80200000`；
+- 开启 Sv39 后的 `kern_init`：`0xffffffffc02000d6`；
+- `sp`：`0xffffffffc0205000`；
+- `bootstacktop`：`0xffffffffc0205000`；
+- `satp`：`0x8000000000080205`。
+
+![GDB 验证物理入口与高地址内核](images/04-gdb-sv39-transition.png)
+
+---
+
+## 八、运行与复现实验步骤
+
+在 WSL 中进入仓库的 `code` 目录：
+
+```bash
+cd /mnt/d/cc-dp/os/code
+```
+
+### 8.1 编译
+
+```bash
+make clean
+make
+```
+
+### 8.2 启动
+
+```bash
+make qemu
+```
+
+看到 `check_alloc_page() succeeded!` 即说明内核启动和分配器自检完成。内核不会自行退出；按 `Ctrl+A`，松开后按 `X` 退出 QEMU。
+
+### 8.3 自动测试
 
 ```bash
 make grade
 ```
 
-课程压缩包的原 `grade` 目标引用了未随包提供的 `tools/grade.sh`。为保证交付可复现，本组编写了 `tools/test_lab1.sh`，并让 `make grade` 调用它。该脚本会重新构建项目、检查链接地址和关键符号、短时运行 QEMU，并验证 OpenSBI 下一跳和内核输出；它是本组的本地验收工具，不代表课程官方评分或分数。
-
-![make grade 通过](./images/05-grade-pass.png)
-
-最终结果：
+预期最后出现：
 
 ```text
-PASS: custom lab1 acceptance builds, links at 0x80200000, and boots through OpenSBI.
+Total Score: 20/20
 ```
 
+### 8.4 GDB 手动调试
+
+终端 1：
+
+```bash
+make debug
+```
+
+终端 2：
+
+```bash
+make gdb
+```
+
+每条 GDB 命令输入后单独回车，例如：
+
+```gdb
+set pagination off
+p/x $pc
+x/5i $pc
+b *0x80200000
+hbreak kern_init
+c
+p/x $pc
+p/x $sp
+p/x &bootstacktop
+p/x $satp
+```
+
+也可用 `sh tools/run_gdb_evidence.sh` 自动完成同一组检查并生成日志。
+
 ---
 
-## 六、实验总结与收获
+## 九、AI 协作、验证与迭代说明
 
-### 6.1 对操作系统的理解
+本实验按照课程视频建议，以职责闭合的功能模块为提示词粒度，并使用 `PROMPT / RELY / GUARANTEE / SPECIFICATION` 四段式描述需求。AI 负责代码实现建议、差异检查和故障定位；小组成员通过以下方式复核：
 
-| 实验知识点 | 对应的 OS 原理 | 关系与差异 |
-|------------|----------------|------------|
-| 交叉编译与裸机链接 | 程序编译、链接和装入 | 普通程序由 OS 装载器装入；内核必须自行规定入口和物理地址，不能依赖现有 OS 运行时。 |
-| `kernel.ld` 段布局 | 地址空间与存储保护基础 | 本实验尚未启用页表，但已经建立代码、只读数据、可写数据和 BSS 的边界。 |
-| OpenSBI 启动 | Bootstrap/固件启动过程 | OpenSBI 类似固件运行时，负责 M 态平台初始化并把控制权交给 S 态内核。 |
-| M/S 特权级 | 内核态与用户态 | RISC-V 在传统内核态/用户态之外增加 M 态，固件与 OS 通过 SBI 分层。 |
-| SBI `ecall` | 分层接口与系统调用思想 | 系统调用是用户程序请求 OS；SBI 是 S 态 OS 请求 M 态固件，层次不同但接口思想相似。 |
-| 内核栈初始化 | 函数调用与运行时上下文 | 进入 C 代码前必须建立可靠栈；后续 trap、进程切换也需要更复杂的上下文管理。 |
-| BSS 清零 | 程序装入语义 | 普通应用由加载器保证 BSS 为零；裸机内核需要在初始化阶段自行完成。 |
+1. 阅读 `Page`、`free_area_t`、地址转换宏和课程测试，确认接口语义。
+2. 用断言和课程注入测试检查成功、失败、拆分、最优选择和相邻合并。
+3. 观察 OpenSBI 的下一跳、DTB 内存范围与内核实际输出。
+4. 用 GDB 直接检查复位 PC、物理入口、高虚拟地址、栈顶和 `satp`。
+5. 对“只显示 OpenSBI”和“开启分页后无输出”分别迭代提示词与实现，而不是绕过测试或伪造结果。
 
-OS 原理中很重要、但本实验尚未涉及的内容包括：中断与异常处理、物理/虚拟内存管理、页表、进程与线程、调度、同步互斥、系统调用、设备驱动和文件系统。这些功能都建立在本实验验证过的启动、链接和基本运行环境之上。
-
-### 6.2 AI 协作开发的经验
-
-1. **先核验资料版本。** 公开指导书、参考文本和课程压缩包可能采用不同实验编号；最终必须以教师提供代码和当前交付要求为准。
-2. **让结论落到工程证据。** 对入口地址、栈顶和启动链的解释不能只依赖文字，应使用 `objdump`、OpenSBI 输出和 GDB 数据交叉验证。
-3. **提示词中提供边界。** 明确 `[RELY]`、`[GUARANTEE]` 和 `[SPECIFICATION]`，可以避免 AI 引入与当前实验版本不一致的模块。
-4. **保留失败过程。** “能编译但不能启动”不是无效结果；`Next Address = 0x0` 正是定位 QEMU 参数问题的关键证据。
-5. **自动化可重复验证。** 将手工检查转化为本组自定义的 `make grade` 验收流程，减少环境变化或后续修改造成的回归，同时明确它不等同于课程官方评分。
+完整提示词记录见 `report/prompt.md`。
 
 ---
+
+## 十、总结
+
+本实验完成了两项核心功能：依据 DTB 和内核内存布局建立物理页管理元数据；实现并启用 Best-Fit 连续物理页分配器。通过地址有序链表、块拆分和双向合并，分配器在保持计数一致的同时满足最小合适块语义。
+
+在工程验证中还解决了本机 QEMU/OpenSBI 镜像交接方式和 Sv39 开启瞬间的低地址取指问题。最终构建成功，QEMU 输出正常，内置检查通过，课程随包测试为 20/20，GDB 验证了 `0x1000 → 0x80200000 → 0xffffffffc02000d6` 的启动与地址空间切换链路。

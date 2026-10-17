@@ -1,6 +1,5 @@
-/bin/
-/obj/
-/.test-output/
-/.gdb.in
-/.qemu.out
-/*.tar.gz
+bin/
+obj/
+.test-output/
+.gdb.in
+.qemu.out
