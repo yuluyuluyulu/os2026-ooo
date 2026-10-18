@@ -41,7 +41,6 @@
 | 调试器 | `riscv64-unknown-elf-gdb`，目标架构 `riscv:rv64` |
 | 构建工具 | GNU Make |
 | 实验代码 | 课程提供的 `lab2.zip` |
-| AI 辅助工具 | Codex 桌面端；结果由源码、测试与调试共同复核 |
 
 课程指导书 Lab2：<http://oslab.mobisys.top/lab2026/_book/>（同内容在线镜像：<https://nankai.gitbook.io/ucore-os-on-risc-v64/lab2>）。本报告只使用其中 Lab2 的物理内存管理内容。
 
@@ -271,10 +270,6 @@ Challenge 没有改动基础接口：Buddy 改为按 order 保存块并用异或
 | SLUB size class | 在“页”之上分配小对象，减少按整页分配的浪费，并利于对象复用和缓存局部性。 |
 | Sv39 页表 | 负责虚拟地址翻译和权限；它与“哪些物理页空闲”的分配策略是两个层次。 |
 | DTB 内存探测 | 把硬件/固件描述转换成 OS 可管理资源，随后仍需扣除保留区。 |
-
-### 9.3 原理课重要但本实验未完整覆盖的内容
-
-本实验未实现多核并发锁与每 CPU 缓存、NUMA/内存 zone、页面回收与 swap、缺页异常、按需分页、写时复制、页面置换、内存压缩，以及面向用户态的权限隔离。当前 SLUB 也未实现 Linux SLUB 的 per-CPU fast path、着色、调试和加固功能，只保留两层分配与 size class 主体思想。
 
 ---
 
