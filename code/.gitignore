@@ -3,3 +3,4 @@ obj/
 .test-output/
 .gdb.in
 .qemu.out
+.challenge.out

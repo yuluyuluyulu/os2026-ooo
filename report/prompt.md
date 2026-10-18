@@ -252,6 +252,75 @@ Case 4（GDB 无法连接）：确认 make debug 的 QEMU 仍在运行且端口�
 
 ---
 
+## 提示词 7：Buddy System 扩展分配器
+
+```text
+[PROMPT]
+任务：在不改变默认 Best-Fit 评分路径的前提下，实现可由编译选项选择的 Buddy
+System 物理页分配器，并编写能够验证取整、分裂、伙伴合并和计数守恒的自检。
+
+[RELY]
+- pmm_manager 六个统一接口、struct Page 的 property/PG_property/page_link。
+- 实际可用区不一定是 2 的幂，伙伴编号以初始可用区 base 为相对起点。
+
+[GUARANTEE]
+- 分 order 空闲链表；初始化分解非 2 次幂区间；分配向上取整并逐级分裂；
+  释放通过 XOR 找伙伴并递归合并；提供 buddy_system check succeeded 证据。
+- 默认 make 仍注册 best_fit_pmm_manager，Challenge 构建才注册 Buddy。
+
+[SPECIFICATION]
+Pre-Condition：init_memmap 收到连续且页对齐的 n 页可用区。
+Case 1：存在足够阶块，返回不小于请求的最小 2 次幂块并正确扣减空闲页数。
+Case 2：仅更高阶有块，逐级二分并把右半块放入对应链表。
+Case 3：释放块的同阶伙伴空闲，删除伙伴并向上合并；否则停止。
+Post-Condition：各空闲块对其尺寸对齐，互不重叠，nr_free 等于所有块页数之和。
+```
+
+## 提示词 8：简化两层 SLUB 扩展分配器
+
+```text
+[PROMPT]
+任务：在物理页分配器之上实现简化 SLUB，体现“页分配层 + 任意大小对象层”，并
+验证多个尺寸级、跨 slab、大对象回退、可写性和全部释放后的页数守恒。
+
+[RELY]
+- alloc_pages/free_pages/page2pa/va_pa_offset 提供页层服务和直接映射地址。
+- 4 KiB 页；允许在 slab 页首保存元数据，在空闲对象内部保存 next 指针。
+
+[GUARANTEE]
+- 16、32、64、128、256、512、1024、2048 字节 size class。
+- 一页全空时归还底层；大于 2048 字节时连续多页分配并记录页数。
+- slub_alloc/slub_free 公共接口与 slub_check 自动测试。
+
+[SPECIFICATION]
+Case 1：size=0 返回 NULL。
+Case 2：小对象使用最小可容纳 size class；无可用 slab 时申请并格式化新页。
+Case 3：大对象按“头部+载荷”所需页数分配，释放时按头部记录归还。
+Post-Condition：测试结束时 nr_free_pages 恢复到测试前值，且无 slab 遗留。
+```
+
+## 提示词 9：实验要求逐项复核与 Challenge 交付
+
+```text
+[PROMPT]
+任务：按 lab2.md 和 Lab2 指导书逐项检查源码、报告和测试。补全 First-Fit 四函数
+分析、First-Fit/Best-Fit 改进问题、参考实现比较、知识点映射、未覆盖原理知识，
+并回答硬件物理内存探测 Challenge。只陈述由源码和实测支持的结果。
+
+[RELY]
+- lab2.md 的必做和 Challenge 条目；课程 Lab2 指导书；当前源码与真实测试日志。
+
+[GUARANTEE]
+- report.md 覆盖所有题目，包含 Buddy/SLUB 设计文档和充分测试说明。
+- make grade 保持 20/20；make challenge-test 输出 PASS；图片来自真实日志。
+
+[SPECIFICATION]
+若基础评分回归失败，优先修复扩展与默认路径的隔离；若 Challenge 自检失败，保留
+失败输出并修复实现，不修改检查条件来制造通过；最终上传前检查仅有 code/report。
+```
+
+---
+
 ## 提示词迭代记录
 
 | 轮次 | 观察结果                                 | 下一轮需求如何收紧                               | 验证结果                            |
@@ -261,3 +330,5 @@ Case 4（GDB 无法连接）：确认 make debug 的 QEMU 仍在运行且端口�
 | 3    | 已有正确下一跳但仍无内核输出             | 把范围缩小到`csrw satp` 后的取指与页表项       | 增加恒等过渡映射后成功进入内核      |
 | 4    | 内核自检通过                             | 增加课程注入测试和失败不改测试的约束             | `make grade` 为 20/20             |
 | 5    | 需要答辩级证据                           | 指定复位、物理入口、高地址、栈和 satp 五组观测   | GDB 全部符合设计                    |
+| 6    | 基础报告缺少练习 1 与必答思考题           | 逐条对照 `lab2.md`，补齐分析、比较与知识映射      | 必做报告条目全部覆盖                |
+| 7    | Challenge 需与基础评分隔离                | 增加专用编译开关和独立自检，保留默认 Best-Fit    | 基础 20/20，Challenge PASS          |

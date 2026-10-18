@@ -146,6 +146,8 @@ $(call finish_all)
 IGNORE_ALLDEPS	= clean \
 				  dist-clean \
 				  grade \
+				  challenge-qemu \
+				  challenge-test \
 				  touch \
 				  print-.+ \
 				  handin
@@ -159,13 +161,23 @@ endif
 TARGETS: $(TARGETS)
 
 .DEFAULT_GOAL := TARGETS
-.PHONY: qemu spike test
+.PHONY: qemu spike test challenge-qemu challenge-test
 qemu: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 	$(V)$(QEMU) \
 		-machine virt \
 		-nographic \
 		-bios default \
 		-kernel $(UCOREIMG)
+
+CHALLENGE_DEFS := -DUSE_BUDDY_PMM -DENABLE_CHALLENGE_TESTS
+
+challenge-qemu:
+	$(V)$(MAKE) $(MAKEOPTS) clean
+	$(V)$(MAKE) $(MAKEOPTS) DEFS="$(CHALLENGE_DEFS)"
+	$(V)$(QEMU) -machine virt -nographic -bios default -kernel $(UCOREIMG)
+
+challenge-test:
+	$(V)$(SH) tools/test_challenges.sh
 
 debug: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 	$(V)$(QEMU) \
