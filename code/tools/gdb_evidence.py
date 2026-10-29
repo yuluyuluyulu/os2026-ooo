@@ -9,7 +9,7 @@ import tempfile
 
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
-evidence = root.parent / "report" / "evidence"
+evidence = root / ".test-output"
 evidence.mkdir(parents=True, exist_ok=True)
 for command in (["make", "--no-print-directory", "clean"],
                 ["make", "--no-print-directory", "DEFS=-DLAB3_SELFTEST"]):

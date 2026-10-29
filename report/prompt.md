@@ -150,7 +150,7 @@ Post-Condition：课程评分三项通过，独立测试还能观察实际关机
 [GUARANTEE]
 - 保留课程测试，新增检查能验证课程测试以外的关键边界。
 - 32 槽比较失败、EPC 错误或 SIE 错误都产生明确失败。
-- 自动日志写入 report/evidence，不生成伪运行截图。
+- 自动日志写入 code/.test-output，不生成伪运行截图。
 
 [SPECIFICATION]
 Case 1：两种断点恢复后，寄存器快照完全一致。
@@ -184,7 +184,7 @@ Post-Condition：自检输出三项 PASS，运行器验证实际结束条件。
 - 已实现的 Trap 入口、恢复宏、中断与异常处理器。
 - 独立自检、课程评分脚本、QEMU 调试接口与 RISC-V GDB。
 - struct trapframe、tf->epc、tf->gpr.sp、__trapret 和 sret。
-- report/report.md、report/prompt.md 和 report/images 的组织形式。
+- report/report.md、report/prompt.md 和 report/image 的组织形式。
 
 [GUARANTEE]
 - frame 布局、异常原因与返回地址均能直接在调试器中观察。

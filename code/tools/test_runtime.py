@@ -10,7 +10,7 @@ if mode not in ("selftest", "challenge", "shutdown"):
     raise SystemExit("usage: test_runtime.py selftest|challenge|shutdown")
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
-evidence = root.parent / "report" / "evidence"
+evidence = root / ".test-output"
 evidence.mkdir(parents=True, exist_ok=True)
 definitions = {"selftest": "-DLAB3_SELFTEST", "challenge": "-DLAB3_SELFTEST -DLAB3_CHALLENGE", "shutdown": ""}
 build = []

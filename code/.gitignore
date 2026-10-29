@@ -1,0 +1,6 @@
+/bin/
+/obj/
+/.test-output/
+/.qemu*.out
+/.gdb.in
+__pycache__/

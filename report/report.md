@@ -159,7 +159,7 @@ OpenSBI 运行在 M 态，内核运行在 S 态。固件负责底层定时器与
 | 重新设置时钟与多次返回，达到 ticks=200 | 40 | PASS |
 | 合计 | 100 | `Total Score: 100/100` |
 
-课程评分结果摘要见 [grade-results.log](evidence/grade-results.log)，保留实际运行中的测试名称、评分及总分。课程测试不单独证明自动关机，因此补充下列独立测试。
+课程评分结果见图 3，三项测试均通过，总分为 100/100。课程测试不单独证明自动关机，因此补充下列独立测试。
 
 ### 7.2 独立自检与关机
 
@@ -169,14 +169,14 @@ OpenSBI 运行在 M 态，内核运行在 S 态。固件负责底层定时器与
 
 自动运行器等待 QEMU 实际退出，要求无 panic/FAIL、退出码为 0、恰好 10 行 `100 ticks`，并检查 1000 ticks 的关机信息；超时视为失败，不能只出现某个成功字符串就判定整个测试成功。
 
-| 命令 | 验证范围 | 日志 |
+| 命令 | 验证范围 | 结果 |
 |------|----------|------|
-| `make selftest` | 两种断点长度、两种非法指令长度、全部 GPR 槽、中断状态保存、定时关机 | [selftest-run.log](evidence/selftest-run.log) |
-| `make shutdown-test` | 不启用扩展宏的默认内核，1000 ticks 后正常退出 | [shutdown-run.log](evidence/shutdown-run.log) |
+| `make selftest` | 两种断点长度、两种非法指令长度、全部 GPR 槽、中断状态保存、定时关机 | PASS，见图 4 |
+| `make shutdown-test` | 不启用扩展宏的默认内核，1000 ticks 后正常退出 | PASS，默认运行输出见图 2 |
 
 ### 7.3 GDB 验证
 
-本次先用 `make gdb-evidence` 生成 [gdb.log](evidence/gdb.log)，再由小组使用 `make debug` 与 `make gdb` 手动复核。报告采用手动 GDB 操作截图，分别在 C 入口、`__trapret` 和 `sret` 后的返回地址停下；截图与日志中的关键数值一致：
+本次先用 `make gdb-evidence` 自动验证，再由小组使用 `make debug` 与 `make gdb` 手动复核。报告采用图 5 的手动 GDB 操作截图，分别在 C 入口、`__trapret` 和 `sret` 后的返回地址停下；截图与自动验证中的关键数值一致：
 
 - Trap frame 大小为 288，cause=`0x3`，status 的 SPP 位为 1，来自 S 态。
 - 原异常地址 `0xffffffffc0200874`，首半字为 `0x9002`，即压缩断点。
@@ -187,29 +187,29 @@ OpenSBI 运行在 M 态，内核运行在 S 态。固件负责底层定时器与
 
 ### 7.4 实际运行截图与结果分析
 
-以下五组图片由小组按 [启动与截图步骤.md](启动与截图步骤.md) 实际运行后提供。构建图保留链接、镜像生成和产物列表区域，GDB 采用带完整命令的手动操作截图。
+以下五组图片由小组实际运行后提供。构建图保留链接、镜像生成和产物列表区域，GDB 采用带完整命令的手动操作截图。
 
 **图 1：默认构建与产物检查。** 2026-10-29 在 WSL 中执行 `make clean`、`make` 和 `ls -lh bin/kernel bin/ucore.img`，终端显示链接生成 `bin/kernel`，随后通过 `riscv64-unknown-elf-objcopy` 生成裸镜像 `bin/ucore.img`。产物列表分别显示约 118 KiB 的 ELF 文件和约 25 KiB 的镜像，说明干净构建完成，调试文件与启动镜像均已生成。内核运行行为再由后续时钟、评分、自检和调试结果验证。
 
-![图 1：内核链接、镜像生成与产物列表](images/01-build.png)
+![图 1：内核链接、镜像生成与产物列表](image/01-build.png)
 
 **图 2：持续时钟与自动关机。** `check_alloc_page() succeeded!` 说明物理页分配器先通过自检。默认内核根页表的虚拟地址为 `0xffffffffc0205000`，对应物理地址 `0x80205000`。初始化时钟后连续输出十行 `100 ticks`，最终显示 `Timer shutdown: 1000 ticks, 10 reports`，与每 100 次中断统计一次、累计十次后关机的设计一致。正常退出状态另由默认关机自动测试日志核对。
 
-![图 2：默认内核时钟统计与关机信息](images/02-timer-shutdown.png)
+![图 2：默认内核时钟统计与关机信息](image/02-timer-shutdown.png)
 
 **图 3：课程评分。** 截图集中展示三项评分，分别为上下文恢复与断点 35/35、非法指令返回 25/25、持续时钟 40/40，合计 `Total Score: 100/100`。这些结果覆盖课程规定的基础验收；独立自检与自动关机结果进一步验证相关边界。
 
-![图 3：课程三项评分及总分 100/100](images/03-grade.png)
+![图 3：课程三项评分及总分 100/100](image/03-grade.png)
 
 **图 4：独立自检。** 三项自检均显示 PASS：32 个 GPR 槽与 16/32 位断点、16/32 位非法指令 EPC、中断状态保存与页数守恒。截图中的 `Illegal instruction at ...` 来自主动作出的受控异常测试，随后仍能继续输出 PASS，说明处理器正确跳过对应指令。末尾的 `Selftest tests: PASS (10 timer reports, clean SBI shutdown)` 表明运行器还检查了十次统计和正常关机。
 
-![图 4：独立 Trap 自检与正常关机](images/04-selftest.png)
+![图 4：独立 Trap 自检与正常关机](image/04-selftest.png)
 
 **图 5：手动 GDB 调试。** 小组在暂停的 QEMU 上连接 GDB，逐条读取 Trap frame 大小、cause、status、原 sp 和 EPC。原 frame 地址为 `0xffffffffc0205c40`，原 sp 为 `0xffffffffc0205d60`，两者相差 `0x120`，即 288 字节。首半字 `0x9002` 对应压缩断点；停到 `__trapret` 后，`p $frame->epc - $saved_epc` 的结果为 2。再停到返回地址时，PC 为 `0xffffffffc0200876`，sp 与保存值相等，`sscratch=0`，说明执行已经经过 `sret` 并恢复原内核栈。
 
 手动操作中曾把继续命令 `c` 与上一条表达式一并输入，GDB 报语法错误；重新单独输入 `thbreak *$frame->epc` 和 `c` 后正常命中返回断点。该提示来自调试命令输入，不是客体内核异常；截图保留这一过程与最终检查结果。
 
-![图 5：手动 GDB 验证 Trap frame、EPC 更新与栈恢复](images/05-gdb.png)
+![图 5：手动 GDB 验证 Trap frame、EPC 更新与栈恢复](image/05-gdb.png)
 
 ## 八、参考框架比较与知识点总结
 

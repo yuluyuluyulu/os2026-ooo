@@ -6,7 +6,7 @@ import subprocess
 
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
-evidence = root.parent / "report" / "evidence"
+evidence = root / ".test-output"
 evidence.mkdir(parents=True, exist_ok=True)
 for target, filename in (("grade", "grade.log"), ("selftest", "selftest-run.log"),
                          ("challenge-test", "challenge-run.log"), ("shutdown-test", "shutdown-run.log")):
