@@ -1,0 +1,31 @@
+The target architecture is set to "riscv:rv64".
+0x0000000000001000 in ?? ()
+Breakpoint 1 at 0xffffffffc0200e9e: file kern/trap/trap.c, line 164.
+
+Breakpoint 1, trap (tf=0xffffffffc0205c40) at kern/trap/trap.c:181
+181	    trap_dispatch(tf);
+=== C trap entry ===
+$1 = 288
+$2 = 0x3
+$3 = 0x8000000200006100
+$4 = 0xffffffffc0205d60
+$5 = 0xffffffffc0200874
+0xffffffffc0200874 <lab3_context_selftest+232>:	0x9002	0x0073
+Hardware assisted breakpoint 2 at 0xffffffffc0200f14: file kern/trap/trapentry.S, line 115.
+
+Temporary breakpoint 2, __trapret () at kern/trap/trapentry.S:115
+115	    RESTORE_ALL
+=== after C handler ===
+$6 = 0xffffffffc0200876
+EPC delta = 2
+Hardware assisted breakpoint 3 at 0xffffffffc0200876: file kern/trap/context_selftest.S, line 88.
+
+Temporary breakpoint 3, lab3_context_selftest () at kern/trap/context_selftest.S:88
+88	    ebreak
+=== after sret ===
+$7 = 0xffffffffc0200876
+$8 = 0xffffffffc0205d60
+$9 = 0x0
+SP restored = 1
+=> 0xffffffffc0200876 <lab3_context_selftest+234>:	ebreak
+[Inferior 1 (process 1) detached]

@@ -1,4 +1,4 @@
-PROJ	:= lab2
+PROJ	:= lab3
 EMPTY	:=
 SPACE	:= $(EMPTY) $(EMPTY)
 SLASH	:= /
@@ -98,6 +98,7 @@ $(call add_files_cc,$(call listf_cc,$(LIBDIR)),libs,)
 
 KINCLUDE	+= kern/debug/ \
 			   kern/driver/ \
+			   kern/trap/ \
 			   kern/mm/ \
 			   kern/arch/
 
@@ -105,6 +106,7 @@ KSRCDIR		+= kern/init \
 			   kern/libs \
 			   kern/debug \
 			   kern/driver \
+			   kern/trap \
 			   kern/mm
 
 KCFLAGS		+= $(addprefix -I,$(KINCLUDE))
@@ -146,8 +148,6 @@ $(call finish_all)
 IGNORE_ALLDEPS	= clean \
 				  dist-clean \
 				  grade \
-				  challenge-qemu \
-				  challenge-test \
 				  touch \
 				  print-.+ \
 				  handin
@@ -161,7 +161,27 @@ endif
 TARGETS: $(TARGETS)
 
 .DEFAULT_GOAL := TARGETS
-.PHONY: qemu spike test challenge-qemu challenge-test
+.PHONY: qemu spike test selftest challenge-test challenge-qemu shutdown-test verify gdb-evidence
+gdb-evidence:
+	$(V)python3 tools/gdb_evidence.py
+
+verify:
+	$(V)python3 tools/verify_lab3.py
+
+selftest:
+	$(V)python3 tools/test_runtime.py selftest
+
+challenge-test:
+	$(V)python3 tools/test_runtime.py challenge
+
+shutdown-test:
+	$(V)python3 tools/test_runtime.py shutdown
+
+challenge-qemu:
+	$(V)$(MAKE) $(MAKEOPTS) clean
+	$(V)$(MAKE) $(MAKEOPTS) DEFS="-DLAB3_SELFTEST -DLAB3_CHALLENGE"
+	$(V)$(QEMU) -machine virt -nographic -bios default -kernel $(UCOREIMG)
+
 qemu: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 	$(V)$(QEMU) \
 		-machine virt \
@@ -169,22 +189,12 @@ qemu: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 		-bios default \
 		-kernel $(UCOREIMG)
 
-CHALLENGE_DEFS := -DUSE_BUDDY_PMM -DENABLE_CHALLENGE_TESTS
-
-challenge-qemu:
-	$(V)$(MAKE) $(MAKEOPTS) clean
-	$(V)$(MAKE) $(MAKEOPTS) DEFS="$(CHALLENGE_DEFS)"
-	$(V)$(QEMU) -machine virt -nographic -bios default -kernel $(UCOREIMG)
-
-challenge-test:
-	$(V)$(SH) tools/test_challenges.sh
-
 debug: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
 	$(V)$(QEMU) \
 		-machine virt \
 		-nographic \
 		-bios default \
-		-kernel $(UCOREIMG) \
+		-kernel $(UCOREIMG)\
 		-s -S
 
 gdb:
@@ -208,11 +218,11 @@ GRADE_GDB_IN	:= .gdb.in
 GRADE_QEMU_OUT	:= .qemu.out
 HANDIN			:= proj$(PROJ)-handin.tar.gz
 
-TOUCH_FILES		:=
+TOUCH_FILES		:= kern/trap/trap.c
 
 MAKEOPTS		:= --quiet --no-print-directory
 
-GRADE_TMP	:= /tmp/lab2_grade
+GRADE_TMP	:= /tmp/lab3_grade
 
 grade:
 	$(V)$(MAKE) $(MAKEOPTS) clean
